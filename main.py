@@ -174,31 +174,7 @@ def totaal_per_categorie(orderbedragen, pad_csv):
 
     return dict(totaal_per_cat)
 def download_facturen_from_mail(imap_server, email_user, email_pass, SAVE_FOLDER="facturen"):
-    def verplaats_mail_naar_behandeld(mail, mail_id, foldernaam="INBOX.behandeldefacturenBrandsfit"):
-        """
-        Verplaatst een mail met mail_id naar de opgegeven IMAP-folder.
-        Maakt de folder aan als die nog niet bestaat.
-        Debug: print IMAP responses.
-        """
-        # Controleer of de folder bestaat, anders aanmaken
-        typ, folders = mail.list()
-        print("IMAP folders:", folders)
-        folder_bestaat = any(foldernaam in f.decode(errors="ignore") for f in folders if isinstance(f, bytes))
-        if not folder_bestaat:
-            print(f"Folder '{foldernaam}' bestaat niet, aanmaken...")
-            resp = mail.create(foldernaam)
-            print("Create response:", resp)
-        # Verplaats de mail
-        print(f"Mail {mail_id} kopiëren naar {foldernaam}...")
-        result = mail.copy(mail_id, foldernaam)
-        print("Copy response:", result)
-        if result[0] == 'OK':
-            # Markeer als verwijderd in INBOX
-            store_result = mail.store(mail_id, '+FLAGS', '\\Deleted')
-            print("Store (delete flag) response:", store_result)
-            print(f"📥 Mail {mail_id.decode() if isinstance(mail_id, bytes) else mail_id} verplaatst naar '{foldernaam}'")
-        else:
-            print(f"⚠️ Kon mail {mail_id.decode() if isinstance(mail_id, bytes) else mail_id} niet verplaatsen naar '{foldernaam}'")
+   
     os.makedirs(SAVE_FOLDER, exist_ok=True)
     mail = imaplib.IMAP4_SSL(imap_server)
     mail.login(email_user, email_pass)
@@ -241,6 +217,31 @@ def download_facturen_from_mail(imap_server, email_user, email_pass, SAVE_FOLDER
 
     # Overzicht van alle gedownloade PDF-bestanden
     return gedownloade_pdfs
+def verplaats_mail_naar_behandeld(mail, mail_id, foldernaam="INBOX.behandeldefacturenBrandsfit"):
+    """
+    Verplaatst een mail met mail_id naar de opgegeven IMAP-folder.
+    Maakt de folder aan als die nog niet bestaat.
+    Debug: print IMAP responses en status.
+    """
+    print(f"[DEBUG] Start verplaats_mail_naar_behandeld: mail_id={mail_id}, foldernaam={foldernaam}")
+    typ, folders = mail.list()
+    print("[DEBUG] IMAP folders:", folders)
+    folder_bestaat = any(foldernaam in f.decode(errors="ignore") for f in folders if isinstance(f, bytes))
+    if not folder_bestaat:
+        print(f"[DEBUG] Folder '{foldernaam}' bestaat niet, aanmaken...")
+        resp = mail.create(foldernaam)
+        print("[DEBUG] Create response:", resp)
+    else:
+        print(f"[DEBUG] Folder '{foldernaam}' bestaat al.")
+    print(f"[DEBUG] Mail {mail_id} kopiëren naar {foldernaam}...")
+    result = mail.copy(mail_id, foldernaam)
+    print("[DEBUG] Copy response:", result)
+    if result[0] == 'OK':
+        store_result = mail.store(mail_id, '+FLAGS', '\\Deleted')
+        print("[DEBUG] Store (delete flag) response:", store_result)
+        print(f"📥 Mail {mail_id.decode() if isinstance(mail_id, bytes) else mail_id} verplaatst naar '{foldernaam}'")
+    else:
+        print(f"⚠️ Kon mail {mail_id.decode() if isinstance(mail_id, bytes) else mail_id} niet verplaatsen naar '{foldernaam}'")
 def vind_weborders_met_posities(lines):
     resultaten = []
     for i, line in enumerate(lines):
@@ -459,19 +460,23 @@ def lees_orderbevestigingen_en_append_orders(imap_server, email_user, email_pass
             referentie = match.group(1)
             if referentie in bestaande_refs:
                 print(f"⏭️ Referentie {referentie} bestaat al in {orders_csv}, wordt overgeslagen.")
+                # Verplaats ook reeds bestaande referenties als je dat wilt:
+                verplaats_mail_naar_behandeld(mail, num, "INBOX.behandeldeorders")
                 continue
             print(f"Gevonden referentie: {referentie}")
             # Prompt voor categorie
             while True:
-                print   ("Cat 1	Kledij die hoort bij wat leden in hun lidgeld inbegrepen krijgen (de 2 jaarlijkse training en zijn nabestellingen)   [speciale gevallen mbt btw recuperatie vs het feit dat we op lidgeld geen Btw moeten betalen] ")
-                print   ("CAT 2	Kledij die we als organisatie ter beschikking stellen van medewekers ( jassen voor trainers, afgevaardigden enz)  of van ploegen ( de gesponsorde outfits)  [Investeringen]")
-                print   ("CAT 3	 Kledij die we als verbruiksgoed beschouwen ( broekjes , kousen ) [verbruiken, kosten]")
-                print   ("CAT 4	 Kledij die we doorverkopen [commerce]")
+                print("Cat 1	Kledij die hoort bij wat leden in hun lidgeld inbegrepen krijgen (de 2 jaarlijkse training en zijn nabestellingen)   [speciale gevallen mbt btw recuperatie vs het feit dat we op lidgeld geen Btw moeten betalen] ")
+                print("CAT 2	Kledij die we als organisatie ter beschikking stellen van medewekers ( jassen voor trainers, afgevaardigden enz)  of van ploegen ( de gesponsorde outfits)  [Investeringen]")
+                print("CAT 3	 Kledij die we als verbruiksgoed beschouwen ( broekjes , kousen ) [verbruiken, kosten]")
+                print("CAT 4	 Kledij die we doorverkopen [commerce]")
                 cat = input(f"Geef categorie voor order {referentie} (CAT1, CAT2, CAT3, CAT4): ").strip().upper()
                 if cat in {"CAT1", "CAT2", "CAT3", "CAT4"}:
                     break
                 print("Ongeldige categorie, probeer opnieuw.")
             nieuwe_orders.append((referentie, cat))
+            print("hallo")
+            verplaats_mail_naar_behandeld(mail, num, "behandeldeorders")
         else:
             print("⚠️ Geen referentie gevonden in mail.")
 
@@ -485,6 +490,7 @@ def lees_orderbevestigingen_en_append_orders(imap_server, email_user, email_pass
     else:
         print("Geen nieuwe orders gevonden.")
 
+    mail.expunge()  # <-- voeg deze regel toe!
     mail.logout()
 
 
